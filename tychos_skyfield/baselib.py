@@ -1,9 +1,74 @@
 """
 Tychosium model implementation in Python.
 Uses updated Tychosium code as reference.
+
+Orbital parameters are loaded from orbital_params.json, which is generated
+from TSN's celestial-settings.json by scripts/sync_params.py.
 """
 from scipy.spatial.transform import Rotation as R
+import json
 import numpy as np
+from pathlib import Path
+
+_params_path = Path(__file__).parent / "orbital_params.json"
+with open(_params_path) as _f:
+    ORBITAL_PARAMS = json.load(_f)
+
+# Parent-child hierarchy as defined in TSN's SolarSystem.jsx.
+# Order matters: parents must be moved before children.
+HIERARCHY = [
+    ("earth", "polar_axis"),
+    ("earth", "sun_def"),
+    ("sun_def", "sun"),
+    ("earth", "moon_def_a"),
+    ("moon_def_a", "moon_def_b"),
+    ("moon_def_b", "moon"),
+    ("earth", "mercury_def_a"),
+    ("mercury_def_a", "mercury_def_b"),
+    ("mercury_def_b", "mercury"),
+    ("earth", "venus_def_a"),
+    ("venus_def_a", "venus_def_b"),
+    ("venus_def_b", "venus"),
+    ("earth", "mars_def_e"),
+    ("mars_def_e", "mars_def_s"),
+    ("mars_def_s", "mars"),
+    ("mars", "phobos"),
+    ("mars", "deimos"),
+    ("sun", "jupiter_def"),
+    ("jupiter_def", "jupiter"),
+    ("sun", "saturn_def"),
+    ("saturn_def", "saturn"),
+    ("sun", "uranus_def"),
+    ("uranus_def", "uranus"),
+    ("sun", "neptune_def"),
+    ("neptune_def", "neptune"),
+    ("sun", "halleys_def"),
+    ("halleys_def", "halleys"),
+    ("earth", "eros_def_a"),
+    ("eros_def_a", "eros_def_b"),
+    ("eros_def_b", "eros"),
+]
+
+# Ordered list of all objects (controls move order).
+ALL_OBJECTS = [
+    "earth", "polar_axis", "sun_def", "sun",
+    "mercury_def_a", "mercury_def_b", "mercury",
+    "moon_def_a", "moon_def_b", "moon",
+    "venus_def_a", "venus_def_b", "venus",
+    "mars_def_e", "mars_def_s", "mars", "phobos", "deimos",
+    "jupiter_def", "jupiter",
+    "saturn_def", "saturn",
+    "uranus_def", "uranus",
+    "neptune_def", "neptune",
+    "halleys_def", "halleys",
+    "eros_def_a", "eros_def_b", "eros",
+]
+
+# Objects that can be observed (planets, not deferents).
+OBSERVABLE_OBJECTS = [
+    "sun", "mercury", "moon", "venus", "mars", "phobos", "deimos",
+    "jupiter", "saturn", "uranus", "neptune", "halleys", "eros",
+]
 
 
 class OrbitCenter:
@@ -255,14 +320,8 @@ class TychosSystem:
 
     """
 
-    _all_objects = ['earth', 'polar_axis', 'sun_def', 'sun',
-            'mercury_def_a', 'mercury_def_b', 'mercury',
-            'moon_def_a', 'moon_def_b', 'moon', 'venus_def_a', 'venus_def_b', 'venus',
-            'mars_def_e', 'mars_def_s', 'mars', 'phobos', 'deimos', 'jupiter_def', 'jupiter',
-            'saturn_def', 'saturn', 'uranus_def', 'uranus', 'neptune_def', 'neptune',
-            'halleys_def', 'halleys', 'eros_def_a', 'eros_def_b', 'eros']
-    _observable_objects = ['sun', 'mercury', 'moon', 'venus', 'mars', 'phobos', 'deimos',
-            'jupiter', 'saturn', 'uranus', 'neptune', 'halleys', 'eros']
+    _all_objects = ALL_OBJECTS
+    _observable_objects = OBSERVABLE_OBJECTS
 
     def __init__(self, julian_day = 2451717.0):
         self.julian_day = julian_day
@@ -283,90 +342,17 @@ class TychosSystem:
 
     def _initialize_objects(self):
         """
-        Defines initial parameters for each planet
+        Defines initial parameters for each planet from ORBITAL_PARAMS.
         :return: none
         """
-
-        self._objs["earth"] = PlanetObj(37.8453, OrbitCenter(0, 0, 0),
-                                        OrbitTilt(0, 0), 0, -0.0002479160869310127)
-        self._objs["polar_axis"] = PlanetObj(0, OrbitCenter(0, 0, 0),
-                                             OrbitTilt(0, 0), 0, 0.0)
-
-        self._objs["sun_def"] = PlanetObj(0.0, OrbitCenter(1.4, -0.6, 0.0),
-                                          OrbitTilt(0.1, 0.0), 0.0, 0.0)
-        self._objs["sun"] = PlanetObj(100.0, OrbitCenter(1.2, -0.1, 0.0),
-                                      OrbitTilt(0.1, 0.0), 0.0, 2 * np.pi)
-
-        self._objs["mercury_def_a"] = PlanetObj(100, OrbitCenter(-6.9, -3.2, 0),
-                                                OrbitTilt(0, 0), 0, 2 * np.pi)
-        self._objs["mercury_def_b"] = PlanetObj(0, OrbitCenter(0, 0, 0),
-                                                OrbitTilt(-1.3, 0.5), 33, -2 * np.pi)
-        self._objs["mercury"] = PlanetObj(38.710225, OrbitCenter(0.6, 3, -0.1),
-                                          OrbitTilt(3, 0.5), -180.8, 26.08763045)
-
-        m_factor = 39.2078
-        self._objs["moon_def_a"] = PlanetObj(0.0279352315075 / m_factor,
-                                             OrbitCenter(0 / m_factor, 0 / m_factor, 0 / m_factor),
-                                             OrbitTilt(-0.2, 0.5), 226.4, 0.71015440177343)
-        self._objs["moon_def_b"] = (
-            PlanetObj(0 / m_factor,
-                      OrbitCenter(-0.38 / m_factor, 0.22 / m_factor, 0 / m_factor),
-                      OrbitTilt(2.3, 2.6), -1.8, 0.0))
-        self._objs["moon"] = (
-            PlanetObj(10 / m_factor,
-                      OrbitCenter(0.8 / m_factor, -0.81 / m_factor, -0.07 / m_factor),
-                      OrbitTilt(-1.8, -2.6), 261.2, 83.28521))
-
-        self._objs["venus_def_a"] = PlanetObj(100, OrbitCenter(0.5, 0.5, 0),
-                                              OrbitTilt(0, 0), 0, 2 * np.pi)
-        self._objs["venus_def_b"] = PlanetObj(0, OrbitCenter(0, 0.65, 0),
-                                              OrbitTilt(0, 0), 16.6, -2 * np.pi)
-        self._objs["venus"] = PlanetObj(72.327789, OrbitCenter(0.6, -0.9, 0),
-                                        OrbitTilt(3.2, -0.05), -23.6, 10.21331385)
-
-        self._objs["mars_def_e"] = PlanetObj(100, OrbitCenter(10.1, -20.7, 0),
-                                             OrbitTilt(0, 0), 0, 2 * np.pi)
-        self._objs["mars_def_s"] = PlanetObj(7.44385, OrbitCenter(0, 0, 0),
-                                             OrbitTilt(0, 0), -115, 0.3974599)
-        self._objs["mars"] = PlanetObj(152.677, OrbitCenter(0, 0, 0),
-                                       OrbitTilt(-0.2, -1.7), 119.3, -3.33985)
-
-        self._objs["phobos"] = PlanetObj(5, OrbitCenter(0, 0, 0),
-                                         OrbitTilt(0, 0), 122, 6986.5)
-        self._objs["deimos"] = PlanetObj(10, OrbitCenter(0, 0, 0),
-                                         OrbitTilt(0, 0), 0, 1802.0)
-
-        self._objs["jupiter_def"] = PlanetObj(0.0, OrbitCenter(0.0, 0.0, 0.0),
-                                              OrbitTilt(0.0, 0.0), 75.4, -2 * np.pi)
-        self._objs["jupiter"] = PlanetObj(520.4, OrbitCenter(-49.0, 3.0, -1.0),
-                                          OrbitTilt(0.0, -1.2), -34.0, 0.52994136)
-
-        self._objs["saturn_def"] = PlanetObj(20, OrbitCenter(11, 0, 0),
-                                             OrbitTilt(0, 0), 518, -2 * np.pi)
-        self._objs["saturn"] = PlanetObj(958.2, OrbitCenter(69, 40, 0),
-                                         OrbitTilt(-2.5, 0), -123.8, 0.21351984)
-
-        self._objs["uranus_def"] = PlanetObj(20, OrbitCenter(0, 0, 0),
-                                             OrbitTilt(0, 0), 123, -2 * np.pi)
-        self._objs["uranus"] = PlanetObj(1920.13568, OrbitCenter(150, -65, 0),
-                                         OrbitTilt(-0.2, -0.7), 371.8, 0.07500314)
-
-        self._objs["neptune_def"] = PlanetObj(20, OrbitCenter(0, 0, 0),
-                                              OrbitTilt(0, 0), 175.2, -2 * np.pi)
-        self._objs["neptune"] = PlanetObj(3004.72, OrbitCenter(0, 20, 0),
-                                          OrbitTilt(-1.6, 1.15), 329.3, 0.03837314)
-
-        self._objs["halleys_def"] = PlanetObj(20, OrbitCenter(-5, 10, 11),
-                                              OrbitTilt(0, 0), 179, -2 * np.pi)
-        self._objs["halleys"] = PlanetObj(1674.5, OrbitCenter(-1540, -233.5, -507),
-                                          OrbitTilt(6.4, 18.55), 76.33, -0.0830100973)
-
-        self._objs["eros_def_a"] = PlanetObj(100, OrbitCenter(-40, 31.5, -0.5),
-                                             OrbitTilt(-7.3, 3.6), 0, 2 * np.pi)
-        self._objs["eros_def_b"] = PlanetObj(0, OrbitCenter(-16, -4.5, 0),
-                                             OrbitTilt(0, 0), 0, -7.291563307179587)
-        self._objs["eros"] = PlanetObj(145.79, OrbitCenter(5.2, -6, 0),
-                                       OrbitTilt(0, 0), 171.8, 4.57668492)
+        for name, p in ORBITAL_PARAMS.items():
+            self._objs[name] = PlanetObj(
+                p["orbit_radius"],
+                OrbitCenter(p["orbit_center_a"], p["orbit_center_b"], p["orbit_center_c"]),
+                OrbitTilt(p["orbit_tilt_a"], p["orbit_tilt_b"]),
+                p["start_pos"],
+                p["speed"],
+            )
 
     def _add_child(self, parent, child):
         """
@@ -380,53 +366,11 @@ class TychosSystem:
 
     def _set_dependencies(self):
         """
-        Sets the dependencies between the system objects
+        Sets the dependencies between the system objects from HIERARCHY.
         :return: none
         """
-
-        self._add_child("earth", "polar_axis")
-
-        self._add_child("earth", "sun_def")
-        self._add_child("sun_def", "sun")
-
-        self._add_child("earth", "moon_def_a")
-
-        self._add_child("moon_def_a", "moon_def_b")
-        self._add_child("moon_def_b", "moon")
-
-        self._add_child("earth", "mercury_def_a")
-        self._add_child("mercury_def_a", "mercury_def_b")
-        self._add_child("mercury_def_b", "mercury")
-
-        self._add_child("earth", "venus_def_a")
-        self._add_child("venus_def_a", "venus_def_b")
-        self._add_child("venus_def_b", "venus")
-
-        self._add_child("earth", "mars_def_e")
-        self._add_child("mars_def_e", "mars_def_s")
-        self._add_child("mars_def_s", "mars")
-
-        self._add_child("mars", "phobos")
-        self._add_child("mars", "deimos")
-
-        self._add_child("sun", "jupiter_def")
-        self._add_child("jupiter_def", "jupiter")
-
-        self._add_child("sun", "saturn_def")
-        self._add_child("saturn_def", "saturn")
-
-        self._add_child("sun", "uranus_def")
-        self._add_child("uranus_def", "uranus")
-
-        self._add_child("sun", "neptune_def")
-        self._add_child("neptune_def", "neptune")
-
-        self._add_child("sun", "halleys_def")
-        self._add_child("halleys_def", "halleys")
-
-        self._add_child("earth", "eros_def_a")
-        self._add_child("eros_def_a", "eros_def_b")
-        self._add_child("eros_def_b", "eros")
+        for parent, child in HIERARCHY:
+            self._add_child(parent, child)
 
     def move_system(self, julian_day):
         """
