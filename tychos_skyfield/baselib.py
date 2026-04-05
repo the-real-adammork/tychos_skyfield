@@ -323,10 +323,10 @@ class TychosSystem:
     _all_objects = ALL_OBJECTS
     _observable_objects = OBSERVABLE_OBJECTS
 
-    def __init__(self, julian_day = 2451717.0):
+    def __init__(self, julian_day=2451717.0, params=None):
         self.julian_day = julian_day
         self._objs = {}
-        self._initialize_objects()
+        self._initialize_objects(params)
         self._set_dependencies()
         self.move_system(julian_day)
 
@@ -340,12 +340,17 @@ class TychosSystem:
                 "Unknown object {0}, possible objects: {1}"
                 .format(item, self.get_all_objects())) from e
 
-    def _initialize_objects(self):
+    def _initialize_objects(self, params=None):
         """
-        Defines initial parameters for each planet from ORBITAL_PARAMS.
+        Defines initial parameters for each planet.
+        :param params: Optional[dict] override for ORBITAL_PARAMS.
+            Same structure as ORBITAL_PARAMS — keys are object names,
+            values are dicts with orbit_radius, orbit_center_a/b/c,
+            orbit_tilt_a/b, start_pos, speed.
         :return: none
         """
-        for name, p in ORBITAL_PARAMS.items():
+        orbital_params = params if params is not None else ORBITAL_PARAMS
+        for name, p in orbital_params.items():
             self._objs[name] = PlanetObj(
                 p["orbit_radius"],
                 OrbitCenter(p["orbit_center_a"], p["orbit_center_b"], p["orbit_center_c"]),
