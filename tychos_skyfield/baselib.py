@@ -139,20 +139,48 @@ class PlanetObj:
         self.location = None
         self.center = None
         self.radius_vec = None
+
+        # Factory-state cache: computed once on the first call to
+        # initialize_orbit_parameters() and reused on every subsequent call.
+        # The cached values depend only on constructor inputs (orbit_tilt,
+        # orbit_center, orbit_radius), not on julian_day, so they are constant
+        # for the lifetime of the object.
+        self._init_rotation_cached = None
+        self._init_center_cached = None
+        self._init_radius_vec_cached = None
+
         self.initialize_orbit_parameters()
 
     def initialize_orbit_parameters(self):
         """
-        It initializes the object rotation, location, center position, and radius vector
-        :return: none
-        """
+        Initializes the object rotation, location, center position, and radius vector.
 
-        self.rotation = (R.from_euler('x', self.orbit_tilt.x, degrees=True) *
-                         R.from_euler('z', self.orbit_tilt.z, degrees=True))
+        First call computes the values from constructor inputs and caches them.
+        Subsequent calls (typically from TychosSystem.move_system before each
+        per-JD reset) restore from the cache instead of rebuilding scipy
+        Rotation objects, which is the dominant cost in the per-eclipse hot loop.
+        """
+        if self._init_rotation_cached is None:
+            self._init_rotation_cached = (
+                R.from_euler('x', self.orbit_tilt.x, degrees=True) *
+                R.from_euler('z', self.orbit_tilt.z, degrees=True)
+            )
+            self._init_center_cached = (
+                np.array([self.orbit_center.x, self.orbit_center.y, self.orbit_center.z])
+                .astype(np.float64)
+            )
+            self._init_radius_vec_cached = np.array([self.orbit_radius, 0.0, 0.0])
+
+        # scipy.spatial.transform.Rotation is treated as immutable here:
+        # nothing in baselib.py mutates a Rotation in-place — move_planet_basic
+        # rebinds self.rotation to a new instance via composition. Sharing the
+        # cached reference is therefore safe.
+        self.rotation = self._init_rotation_cached
+        # numpy arrays must be copied because move_planet mutates self.center
+        # and self.radius_vec via in-place operations.
         self.location = np.array([0.0, 0.0, 0.0])
-        self.center = (np.array([self.orbit_center.x, self.orbit_center.y, self.orbit_center.z]).
-                       astype(np.float64))
-        self.radius_vec = np.array([self.orbit_radius, 0.0, 0.0])
+        self.center = self._init_center_cached.copy()
+        self.radius_vec = self._init_radius_vec_cached.copy()
 
     def move_planet_tt(self, time_julian):
         """
