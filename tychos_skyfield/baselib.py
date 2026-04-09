@@ -351,12 +351,46 @@ class TychosSystem:
     _all_objects = ALL_OBJECTS
     _observable_objects = OBSERVABLE_OBJECTS
 
-    def __init__(self, julian_day=2451717.0, params=None):
+    def __init__(self, julian_day=2451717.0, params=None, bodies=None):
+        """
+        Parameters
+        ----------
+        julian_day : float
+            Initial Julian Day for the system.
+        params : dict, optional
+            Orbital parameter overrides (same structure as ORBITAL_PARAMS).
+        bodies : list[str], optional
+            If given, only initialize these observable bodies (e.g. ["sun", "moon"])
+            plus earth and any deferents they depend on. Speeds up move_system()
+            by skipping unused bodies.
+        """
         self.julian_day = julian_day
         self._objs = {}
+        if bodies is not None:
+            needed = self._resolve_needed_bodies(bodies)
+            self._all_objects = [b for b in ALL_OBJECTS if b in needed]
+            self._observable_objects = [b for b in OBSERVABLE_OBJECTS if b in needed]
         self._initialize_objects(params)
         self._set_dependencies()
         self.move_system(julian_day)
+
+    @staticmethod
+    def _resolve_needed_bodies(bodies):
+        """Given a list of observable body names, return the full set of
+        bodies needed (including earth, polar_axis, and all deferents in
+        the dependency chain)."""
+        needed = {"earth", "polar_axis"}
+        needed.update(b.lower() for b in bodies)
+        # Walk HIERARCHY to find all ancestors of requested bodies
+        # Repeat until stable (handles multi-level chains)
+        changed = True
+        while changed:
+            changed = False
+            for parent, child in HIERARCHY:
+                if child in needed and parent not in needed:
+                    needed.add(parent)
+                    changed = True
+        return needed
 
     def __getitem__(self, item):
         item = item.lower()
@@ -378,7 +412,10 @@ class TychosSystem:
         :return: none
         """
         orbital_params = params if params is not None else ORBITAL_PARAMS
+        active = set(self._all_objects)
         for name, p in orbital_params.items():
+            if name not in active:
+                continue
             self._objs[name] = PlanetObj(
                 p["orbit_radius"],
                 OrbitCenter(p["orbit_center_a"], p["orbit_center_b"], p["orbit_center_c"]),
@@ -403,7 +440,8 @@ class TychosSystem:
         :return: none
         """
         for parent, child in HIERARCHY:
-            self._add_child(parent, child)
+            if parent in self._objs and child in self._objs:
+                self._add_child(parent, child)
 
     def move_system(self, julian_day):
         """
@@ -423,20 +461,20 @@ class TychosSystem:
         for p in self._all_objects:
             self._objs[p].move_planet_tt(julian_day)
 
-    @classmethod
-    def get_all_objects(cls):
+    def get_all_objects(self):
         """
-        Returns all possible objects
+        Returns all objects in this system (may be a subset if bodies= was used).
         :return: list[string]
         """
+        return list(self._all_objects)
 
-        return cls._all_objects
-
-    @classmethod
-    def get_observable_objects(cls):
+    def get_observable_objects(self):
         """
-        Returns observable objects
+        Returns observable objects in this system (may be a subset if bodies= was used).
         :return: list[string]
         """
+        return list(self._observable_objects)
 
-        return cls._observable_objects
+    def has_body(self, name: str) -> bool:
+        """Check whether a body is available in this system instance."""
+        return name.lower() in self._objs
